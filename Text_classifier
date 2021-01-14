@@ -1,0 +1,138 @@
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+
+
+import time
+import re
+import pandas as pd
+
+from sklearn.decomposition import LatentDirichletAllocation,PCA
+from sklearn import svm
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_extraction.text import CountVectorizer,TfidfVectorizer
+from sklearn.model_selection import croass_val_score
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import fetch_20newsgroups
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.stem import WordNetLemmatizer
+from nltk import pos_tag
+from sklearn.naive_bayes import MultinomialNB
+
+
+# Surpress warnings
+import warnings; 
+warnings.simplefilter('ignore')
+
+driver = webdriver.Chrome('D:\\Softwares\\chromedriver.exe')
+Categories = ['Cricket','Twenty20','Test_cricket','One_Day_International',
+              'Technology','Technology_tree',
+              'Knowledge_economy','Technology_and_society',
+              'Health','World_Health_Organization','Health_care','Life_satisfaction','Therapy',
+              'Film','Celluloid','Camera','Sound_film']
+
+result={}
+content=[]
+cat=[]
+for each in Categories:
+    driver.get("https://en.wikipedia.org/wiki/"+each)
+    time.sleep(10)  #get URL's page source
+    nbr=1
+    all_paras = driver.find_elements_by_xpath('//div[@id="mw-content-text"]//p')
+    for para in all_paras:
+        temp=para.text
+        temp=re.sub('\[\d+]', '', temp)#Replace numbers in square brackets like [1] [22]
+        temp=re.sub('\([A-Z]+\)','',temp) 
+        temp=re.sub('\[\w+\s\w+]','',temp)# Replace double words in square brackets from the corpus
+        temp=re.sub('[^\sa-zA-Z0-9.-]','',temp)#Replace all special characters except hyphens and period.
+        if (temp!= ""):
+            content.append(temp)
+            if each in ('Twenty20','Test_cricket','One_Day_International'):
+                cat.append('Cricket')
+            elif each in ('Technology_tree','Knowledge_economy','Technology_life_cycle','Technology_and_society'):
+                cat.append('Technology')
+            elif each in ('World_Health_Organization','Health_care','Well-being','Life_satisfaction','Therapy'):
+                cat.append('Health')
+            elif each in ('Celluloid','Camera','Sound_film','Digital_media'):
+                cat.append('Film')
+            else:
+                cat.append(each)
+            
+
+result['Category']= cat
+result['Text'] = content
+
+wiki_df=pd.DataFrame(result)
+
+wiki_df = wiki_df.sample(frac=1).reset_index(drop=True)
+
+wiki_df.to_csv('Wiki_corpus.csv')
+
+vectorizer = CountVectorizer(min_df = 0.05 , max_df= 0.95, stop_words="english")
+
+features1 = pd.DataFrame(vectorizer.fit_transform(wiki_df['Text']).toarray(),columns=vectorizer.get_feature_names())
+features1.columns
+
+
+X_train, X_test, y_train, y_test = train_test_split(features1, wiki_df['Category'],test_size=0.30)
+
+#Logistic Model
+
+model = LogisticRegression(random_state=0, solver='lbfgs', multi_class='multinomial')
+model.fit(X_train,y_train)
+model.score(X_test,y_test)
+cross_val_score(model,features1, wiki_df['Category'],cv=4).mean()
+
+#Naive Bayes
+clf = MultinomialNB()
+clf.fit(X_train,y_train)
+
+# Prediction accuracy on test dataset
+y_pred = clf.predict(X_test)
+clf.score(X_test,y_test)
+
+
+#Pre process the text via Lemmatisation and then fit into the models
+
+wnl = WordNetLemmatizer()
+def lemmatizeSentences(data):
+    count = 0
+    for text in data:
+        sentence = ""
+        for i, j in pos_tag(word_tokenize(text)):
+            word = ''
+            if j[0].lower() in ['n', 'v', 'r']:
+                word = wnl.lemmatize(i, j[0].lower())
+            elif j[0].lower() is 'j':
+                word = wnl.lemmatize(i, 'a')
+            else:
+                word = wnl.lemmatize(i)
+            sentence = sentence + " " + word.lower()
+        data[count] = sentence
+        count = count + 1;
+
+    return data
+    
+wiki_df['Text_lemma'] = lemmatizeSentences(wiki_df['Text'])
+
+wiki_df['Text_lemma'].head()
+
+features2 = pd.DataFrame(vectorizer.fit_transform(wiki_df['Text_lemma']).toarray(),columns=vectorizer.get_feature_names())
+
+features2.head()
+
+#Logistic model
+X_train, X_test, y_train, y_test = train_test_split(features2, wiki_df['Category'],test_size=0.30)
+model = LogisticRegression(random_state=0, solver='lbfgs', multi_class='multinomial')
+
+model.fit(X_train,y_train)
+model.score(X_test,y_test)
+
+cross_val_score(model,features2, wiki_df['Category'],cv=4).mean()
+
+#Naive Bayes
+clf = MultinomialNB()
+clf.fit(X_train,y_train)
+
+# Prediction accuracy on test dataset
+y_pred = clf.predict(X_test)
+clf.score(X_test,y_test)
